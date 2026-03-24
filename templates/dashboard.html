@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Multi-Cluster Kubernetes Health Monitoring Dashboard">
+    <title>{{ .title }}</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body x-data="{ darkMode: true }" :class="darkMode ? 'dark' : ''">
+    <div class="app-container">
+        <!-- Navigation Header -->
+        <nav class="main-nav">
+            <div class="nav-brand">
+                <span class="brand-icon">⎈</span>
+                <span class="brand-text">Multi-Cluster Dashboard</span>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-link active">Dashboard</a>
+                <a href="/alerts" class="nav-link">Alerts</a>
+            </div>
+            <div class="nav-actions">
+                <button @click="darkMode = !darkMode" class="theme-toggle" :title="darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
+                    <span x-show="darkMode">☀️</span>
+                    <span x-show="!darkMode">🌙</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="page-header">
+                <h1>Cluster Overview</h1>
+                <p class="page-subtitle">Real-time health monitoring across all Kubernetes clusters</p>
+            </div>
+
+            <!-- Cluster Cards Grid with HTMX polling -->
+            <div id="clusters-container" 
+                 hx-get="/api/clusters" 
+                 hx-trigger="load, every 5s" 
+                 hx-swap="innerHTML"
+                 class="clusters-grid">
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Loading clusters...</p>
+                </div>
+            </div>
+
+            <!-- Charts Section -->
+            <section class="charts-section">
+                <h2>Resource Utilization</h2>
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <h3>CPU Usage</h3>
+                        <canvas id="cpuChart"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Memory Usage</h3>
+                        <canvas id="memoryChart"></canvas>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="main-footer">
+            <p>&copy; 2024 Multi-Cluster Dashboard</p>
+        </footer>
+    </div>
+
+    <script>
+        // Initialize charts
+        document.addEventListener('DOMContentLoaded', function() {
+            initCharts();
+        });
+
+        function initCharts() {
+            const chartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            color: 'rgba(255, 255, 255, 0.8)'
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        ticks: { color: 'rgba(255, 255, 255, 0.6)' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    x: {
+                        ticks: { color: 'rgba(255, 255, 255, 0.6)' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    }
+                }
+            };
+
+            // CPU Chart
+            const cpuCtx = document.getElementById('cpuChart');
+            if (cpuCtx) {
+                new Chart(cpuCtx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: []
+                    },
+                    options: chartOptions
+                });
+            }
+
+            // Memory Chart
+            const memCtx = document.getElementById('memoryChart');
+            if (memCtx) {
+                new Chart(memCtx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: []
+                    },
+                    options: chartOptions
+                });
+            }
+        }
+
+        // Handle HTMX response to render cluster cards
+        document.body.addEventListener('htmx:afterSwap', function(event) {
+            if (event.detail.target.id === 'clusters-container') {
+                renderClusterCards(event.detail.xhr.response);
+            }
+        });
+
+        function renderClusterCards(jsonResponse) {
+            try {
+                const data = JSON.parse(jsonResponse);
+                const container = document.getElementById('clusters-container');
+                
+                if (!data.clusters || data.clusters.length === 0) {
+                    container.innerHTML = '<div class="empty-state"><p>No clusters configured. Check your cluster configuration.</p></div>';
+                    return;
+                }
+
+                let html = '';
+                data.clusters.forEach(cluster => {
+                    const statusClass = cluster.status.toLowerCase();
+                    html += `
+                        <a href="/cluster/${cluster.name}" class="cluster-card ${statusClass}">
+                            <div class="card-header">
+                                <div class="cluster-info">
+                                    <h3>${cluster.displayName || cluster.name}</h3>
+                                    <span class="cluster-context">${cluster.context}</span>
+                                </div>
+                                <span class="status-badge ${statusClass}">${cluster.status}</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="metrics-grid">
+                                    <div class="metric">
+                                        <span class="metric-label">CPU</span>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill cpu" style="width: ${Math.min(cluster.cpuUsage, 100)}%"></div>
+                                        </div>
+                                        <span class="metric-value">${cluster.cpuUsage.toFixed(1)}%</span>
+                                    </div>
+                                    <div class="metric">
+                                        <span class="metric-label">Memory</span>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill memory" style="width: ${Math.min(cluster.memoryUsage, 100)}%"></div>
+                                        </div>
+                                        <span class="metric-value">${cluster.memoryUsage.toFixed(1)}%</span>
+                                    </div>
+                                </div>
+                                <div class="stats-row">
+                                    <div class="stat">
+                                        <span class="stat-icon">📦</span>
+                                        <span class="stat-value">${cluster.nodeCount}</span>
+                                        <span class="stat-label">Nodes</span>
+                                    </div>
+                                    <div class="stat">
+                                        <span class="stat-icon">🔷</span>
+                                        <span class="stat-value">${cluster.podCount}</span>
+                                        <span class="stat-label">Pods</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </a>
+                    `;
+                });
+                container.innerHTML = html;
+            } catch (e) {
+                console.error('Failed to parse cluster data:', e);
+            }
+        }
+    </script>
+</body>
+</html>

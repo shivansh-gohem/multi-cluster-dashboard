@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ .title }}</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+
+<body x-data="{ darkMode: true, activeTab: 'nodes' }" :class="darkMode ? 'dark' : ''">
+    <div class="app-container">
+        <!-- Navigation Header -->
+        <nav class="main-nav">
+            <div class="nav-brand">
+                <span class="brand-icon">⎈</span>
+                <span class="brand-text">Multi-Cluster Dashboard</span>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-link">Dashboard</a>
+                <a href="/alerts" class="nav-link">Alerts</a>
+            </div>
+            <div class="nav-actions">
+                <button @click="darkMode = !darkMode" class="theme-toggle">
+                    <span x-show="darkMode">☀️</span>
+                    <span x-show="!darkMode">🌙</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Breadcrumb -->
+            <div class="breadcrumb">
+                <a href="/">Dashboard</a>
+                <span class="separator">/</span>
+                <span class="current">{{ .clusterName }}</span>
+            </div>
+
+            <div class="page-header">
+                <h1>{{ .clusterName }}</h1>
+                <div id="cluster-status" hx-get="/api/clusters/{{ .clusterName }}" hx-trigger="load, every 5s"
+                    hx-swap="innerHTML">
+                    <span class="status-badge loading">Loading...</span>
+                </div>
+            </div>
+
+            <!-- Cluster Stats -->
+            <section class="stats-section" id="cluster-stats">
+                <div class="stat-card">
+                    <div class="stat-icon">📊</div>
+                    <div class="stat-content">
+                        <span class="stat-value" id="cpu-value">--</span>
+                        <span class="stat-label">CPU Usage</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">💾</div>
+                    <div class="stat-content">
+                        <span class="stat-value" id="memory-value">--</span>
+                        <span class="stat-label">Memory Usage</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">📦</div>
+                    <div class="stat-content">
+                        <span class="stat-value" id="node-count">--</span>
+                        <span class="stat-label">Nodes</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🔷</div>
+                    <div class="stat-content">
+                        <span class="stat-value" id="pod-count">--</span>
+                        <span class="stat-label">Pods</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab" :class="{ active: activeTab === 'nodes' }" @click="activeTab = 'nodes'">
+                    Nodes
+                </button>
+                <button class="tab" :class="{ active: activeTab === 'pods' }" @click="activeTab = 'pods'">
+                    Pods
+                </button>
+                <button class="tab" :class="{ active: activeTab === 'metrics' }" @click="activeTab = 'metrics'">
+                    Metrics History
+                </button>
+            </div>
+
+            <!-- Nodes Tab -->
+            <div x-show="activeTab === 'nodes'" class="tab-content">
+                <div id="nodes-table" hx-get="/api/clusters/{{ .clusterName }}/nodes" hx-trigger="load, every 10s"
+                    hx-swap="innerHTML">
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>Loading nodes...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pods Tab -->
+            <div x-show="activeTab === 'pods'" class="tab-content">
+                <div id="pods-table" hx-get="/api/clusters/{{ .clusterName }}/pods" hx-trigger="load, every 10s"
+                    hx-swap="innerHTML">
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>Loading pods...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Metrics Tab -->
+            <div x-show="activeTab === 'metrics'" class="tab-content">
+                <div class="chart-card large">
+                    <h3>Resource Usage (24h)</h3>
+                    <canvas id="historyChart"></canvas>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="main-footer">
+            <p>&copy; 2024 Multi-Cluster Dashboard</p>
+        </footer>
+    </div>
+
+    <script>
+        const clusterName = '{{ .clusterName }}';
+        let historyChart = null;
+
+        document.addEventListener('DOMContentLoaded', function () {
+            initHistoryChart();
+            loadClusterHistory();
+        });
+
+        // Handle cluster details response
+        document.body.addEventListener('htmx:afterSwap', function (event) {
+            if (event.detail.target.id === 'cluster-status') {
+                updateClusterStats(event.detail.xhr.response);
+            }
+            if (event.detail.target.id === 'nodes-table') {
+                renderNodesTable(event.detail.xhr.response);
+            }
+            if (event.detail.target.id === 'pods-table') {
+                renderPodsTable(event.detail.xhr.response);
+            }
+        });
+
+        function updateClusterStats(jsonResponse) {
+            try {
+                const data = JSON.parse(jsonResponse);
+                const cluster = data.cluster;
+
+                document.getElementById('cluster-status').innerHTML =
+                    `<span class="status-badge ${cluster.status.toLowerCase()}">${cluster.status}</span>`;
+                document.getElementById('cpu-value').textContent = cluster.cpuUsage.toFixed(1) + '%';
+                document.getElementById('memory-value').textContent = cluster.memoryUsage.toFixed(1) + '%';
+                document.getElementById('node-count').textContent = cluster.nodeCount;
+                document.getElementById('pod-count').textContent = cluster.podCount;
+            } catch (e) {
+                console.error('Failed to parse cluster details:', e);
+            }
+        }
+
+        function renderNodesTable(jsonResponse) {
+            try {
+                const data = JSON.parse(jsonResponse);
+                const container = document.getElementById('nodes-table');
+
+                if (!data.nodes || data.nodes.length === 0) {
+                    container.innerHTML = '<p class="empty-state">No nodes found</p>';
+                    return;
+                }
+
+                let html = `
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Status</th>
+                                <th>Roles</th>
+                                <th>CPU</th>
+                                <th>Memory</th>
+                                <th>Age</th>
+                                <th>Version</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                data.nodes.forEach(node => {
+                    const statusClass = node.status === 'Ready' ? 'healthy' : 'critical';
+                    html += `
+                        <tr>
+                            <td><strong>${node.name}</strong></td>
+                            <td><span class="status-badge ${statusClass}">${node.status}</span></td>
+                            <td>${node.roles.join(', ')}</td>
+                            <td>${node.cpuUsage ? node.cpuUsage.toFixed(1) + '%' : 'N/A'}</td>
+                            <td>${node.memUsage ? node.memUsage.toFixed(1) + '%' : 'N/A'}</td>
+                            <td>${node.age}</td>
+                            <td>${node.version}</td>
+                        </tr>
+                    `;
+                });
+
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } catch (e) {
+                console.error('Failed to parse nodes:', e);
+            }
+        }
+
+        function renderPodsTable(jsonResponse) {
+            try {
+                const data = JSON.parse(jsonResponse);
+                const container = document.getElementById('pods-table');
+
+                if (!data.pods || data.pods.length === 0) {
+                    container.innerHTML = '<p class="empty-state">No pods found</p>';
+                    return;
+                }
+
+                let html = `
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Namespace</th>
+                                <th>Status</th>
+                                <th>Restarts</th>
+                                <th>Node</th>
+                                <th>Age</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                data.pods.forEach(pod => {
+                    const statusClass = pod.status === 'Running' ? 'healthy' :
+                        pod.status === 'Pending' ? 'warning' : 'critical';
+                    html += `
+                        <tr>
+                            <td><strong>${pod.name}</strong></td>
+                            <td>${pod.namespace}</td>
+                            <td><span class="status-badge ${statusClass}">${pod.status}</span></td>
+                            <td>${pod.restarts}</td>
+                            <td>${pod.node || 'N/A'}</td>
+                            <td>${pod.age}</td>
+                        </tr>
+                    `;
+                });
+
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } catch (e) {
+                console.error('Failed to parse pods:', e);
+            }
+        }
+
+        function initHistoryChart() {
+            const ctx = document.getElementById('historyChart');
+            if (!ctx) return;
+
+            historyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'CPU Usage',
+                            data: [],
+                            borderColor: 'rgb(99, 102, 241)',
+                            backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: 'Memory Usage',
+                            data: [],
+                            borderColor: 'rgb(236, 72, 153)',
+                            backgroundColor: 'rgba(236, 72, 153, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: 'rgba(255, 255, 255, 0.8)' }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: { color: 'rgba(255, 255, 255, 0.6)' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        },
+                        x: {
+                            ticks: { color: 'rgba(255, 255, 255, 0.6)' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function loadClusterHistory() {
+            fetch(`/api/clusters/${clusterName}/history`)
+                .then(res => res.json())
+                .then(data => {
+                    if (historyChart && data.snapshots) {
+                        const labels = data.snapshots.map(s =>
+                            new Date(s.timestamp).toLocaleTimeString()
+                        );
+                        historyChart.data.labels = labels;
+                        historyChart.data.datasets[0].data = data.snapshots.map(s => s.cpuUsage);
+                        historyChart.data.datasets[1].data = data.snapshots.map(s => s.memoryUsage);
+                        historyChart.update();
+                    }
+                })
+                .catch(console.error);
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,37 @@
+# Multi-Cluster Configuration
+# Configure your Kubernetes clusters and their Prometheus endpoints here
+# This dashboard connects to existing clusters - it doesn't create them
+
+clusters:
+  # Example: Google Kubernetes Engine cluster
+  # - name: production-gke
+  #   displayName: "GKE Production"
+  #   context: "gke_my-project_us-central1_prod-cluster"
+  #   prometheusURL: "http://prometheus.prod.example.com:9090"
+  #   enabled: true
+
+  # Example: Amazon EKS cluster
+  # - name: staging-eks
+  #   displayName: "AWS EKS Staging"
+  #   context: "arn:aws:eks:us-east-1:123456789:cluster/staging"
+  #   prometheusURL: "http://prometheus.staging.example.com:9090"
+  #   enabled: true
+
+  # Example: Azure AKS cluster
+  # - name: azure-aks
+  #   displayName: "Azure AKS Dev"
+  #   context: "aks-dev-cluster"
+  #   prometheusURL: "http://prometheus.dev.example.com:9090"
+  #   enabled: true
+
+  # Add your clusters below:
+  - name: cluster1
+    displayName: "Primary Cluster"
+    context: "your-kubeconfig-context"
+    prometheusURL: "http://your-prometheus-endpoint:9090"
+    enabled: true
+
+# How to use:
+# 1. Ensure your kubeconfig has the cluster context configured
+# 2. Set the Prometheus URL (use port-forward or external endpoint)
+# 3. Set enabled: true for clusters you want to monitor

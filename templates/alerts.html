@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ .title }}</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+</head>
+
+<body x-data="{ darkMode: true }" :class="darkMode ? 'dark' : ''">
+    <div class="app-container">
+        <!-- Navigation Header -->
+        <nav class="main-nav">
+            <div class="nav-brand">
+                <span class="brand-icon">⎈</span>
+                <span class="brand-text">Multi-Cluster Dashboard</span>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-link">Dashboard</a>
+                <a href="/alerts" class="nav-link active">Alerts</a>
+            </div>
+            <div class="nav-actions">
+                <button @click="darkMode = !darkMode" class="theme-toggle">
+                    <span x-show="darkMode">☀️</span>
+                    <span x-show="!darkMode">🌙</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="page-header">
+                <h1>Alerts</h1>
+                <p class="page-subtitle">Active alerts across all clusters</p>
+            </div>
+
+            <!-- Alerts List -->
+            <div id="alerts-container" hx-get="/api/alerts" hx-trigger="load, every 10s" hx-swap="innerHTML"
+                class="alerts-list">
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Loading alerts...</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="main-footer">
+            <p>&copy; 2024 Multi-Cluster Dashboard</p>
+        </footer>
+    </div>
+
+    <script>
+        document.body.addEventListener('htmx:afterSwap', function (event) {
+            if (event.detail.target.id === 'alerts-container') {
+                renderAlerts(event.detail.xhr.response);
+            }
+        });
+
+        function renderAlerts(jsonResponse) {
+            try {
+                const data = JSON.parse(jsonResponse);
+                const container = document.getElementById('alerts-container');
+
+                if (!data.alerts || data.alerts.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state success">
+                            <div class="empty-icon">✅</div>
+                            <h3>All Clear!</h3>
+                            <p>No active alerts. All clusters are operating normally.</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let html = '';
+                data.alerts.forEach(alert => {
+                    const severityClass = alert.severity.toLowerCase();
+                    const icon = alert.severity === 'Critical' ? '🚨' : '⚠️';
+                    const timestamp = new Date(alert.timestamp).toLocaleString();
+
+                    html += `
+                        <div class="alert-item ${severityClass}">
+                            <div class="alert-icon">${icon}</div>
+                            <div class="alert-content">
+                                <div class="alert-header">
+                                    <span class="alert-cluster">${alert.cluster}</span>
+                                    <span class="alert-severity ${severityClass}">${alert.severity}</span>
+                                </div>
+                                <p class="alert-message">${alert.message}</p>
+                                <span class="alert-time">${timestamp}</span>
+                            </div>
+                        </div>
+                    `;
+                });
+                container.innerHTML = html;
+            } catch (e) {
+                console.error('Failed to parse alerts:', e);
+            }
+        }
+    </script>
+</body>
+
+</html>
