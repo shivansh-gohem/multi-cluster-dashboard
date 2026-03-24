@@ -5,209 +5,274 @@ import (
 	"net/http"
 	"time"
 
-	"multi-cluster-dashboard/internal/models"
 	"multi-cluster-dashboard/internal/services"
 	"multi-cluster-dashboard/internal/store"
 
 	"github.com/gin-gonic/gin"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// APIHandler handles all API requests
 type APIHandler struct {
-	k8sService  *services.KubernetesService
-	promService *services.PrometheusService
-	store       *store.MetricsStore
+	registry *services.ClusterRegistry
+	store    *store.MetricsStore
 }
 
-// NewAPIHandler creates a new API handler
-func NewAPIHandler(k8s *services.KubernetesService, prom *services.PrometheusService, s *store.MetricsStore) *APIHandler {
+func NewAPIHandler(registry *services.ClusterRegistry, s *store.MetricsStore) *APIHandler {
 	return &APIHandler{
-		k8sService:  k8s,
-		promService: prom,
-		store:       s,
+		registry: registry,
+		store:    s,
 	}
 }
 
-// GetClusters returns all clusters with their health status
 func (h *APIHandler) GetClusters(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-	defer cancel()
+	clusters := h.registry.GetAll()
+	var result []gin.H
 
-	configs := h.k8sService.GetConfigs()
-	clusters := make([]models.Cluster, 0, len(configs))
-
-	for _, cfg := range configs {
-		if !cfg.Enabled {
+	for _, cl := range clusters {
+		// Only show reachable/online clusters on the dashboard
+		if !cl.Reachable {
 			continue
 		}
 
-		cluster := models.Cluster{
-			Name:        cfg.Name,
-			DisplayName: cfg.DisplayName,
-			Context:     cfg.Context,
-			Status:      "Unknown",
-			LastUpdated: time.Now(),
+		entry := gin.H{
+			"name":        cl.Name,
+			"displayName": cl.DisplayName,
+			"context":     cl.Name,
+			"reachable":   cl.Reachable,
+			"status":      "Unknown",
+			"nodeCount":   0,
+			"podCount":    0,
+			"cpuUsage":    0.0,
+			"memoryUsage": 0.0,
 		}
 
-		// Check connectivity
-		if !h.k8sService.CheckConnectivity(ctx, cfg.Name) {
-			cluster.Status = "Critical"
-			clusters = append(clusters, cluster)
-			continue
-		}
+		nodes, _ := cl.Clientset.CoreV1().Nodes().List(
+			context.Background(), metav1.ListOptions{},
+		)
+		pods, _ := cl.Clientset.CoreV1().Pods("").List(
+			context.Background(), metav1.ListOptions{},
+		)
 
-		// Get node count
-		nodeCount, err := h.k8sService.GetNodeCount(ctx, cfg.Name)
-		if err == nil {
-			cluster.NodeCount = nodeCount
-		}
-
-		// Get pod summary
-		running, pending, failed, total, err := h.k8sService.GetPodSummary(ctx, cfg.Name)
-		if err == nil {
-			cluster.PodCount = total
-			_ = running // for future use
-		}
-
-		// Get metrics from Prometheus
-		if h.promService.CheckConnectivity(ctx, cfg.PrometheusURL) {
-			if cpu, err := h.promService.GetCPUUsage(ctx, cfg.PrometheusURL); err == nil {
-				cluster.CPUUsage = cpu
-			}
-			if mem, err := h.promService.GetMemoryUsage(ctx, cfg.PrometheusURL); err == nil {
-				cluster.MemoryUsage = mem
+		running, failed := 0, 0
+		for _, p := range pods.Items {
+			if p.Status.Phase == "Running" {
+				running++
+			} else if p.Status.Phase == "Failed" || p.Status.Phase == "CrashLoopBackOff" {
+				failed++
 			}
 		}
 
-		// Determine health status
-		cluster.Status = determineClusterStatus(cluster.CPUUsage, cluster.MemoryUsage, pending, failed)
+		entry["nodeCount"] = len(nodes.Items)
+		entry["podCount"] = len(pods.Items)
+		entry["runningPods"] = running
+		entry["failedPods"] = failed
+            
+		cpu, mem := cl.GetUtilization()
+		entry["cpuUsage"] = cpu
+		entry["memoryUsage"] = mem
 
-		clusters = append(clusters, cluster)
+		if failed > 0 || cpu > 90 || mem > 90 {
+			entry["status"] = "Warning"
+		} else {
+			entry["status"] = "Healthy"
+		}
+
+		result = append(result, entry)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"clusters": clusters,
-		"count":    len(clusters),
+		"clusters": result,
+		"count":    len(result),
 	})
 }
 
-// GetClusterDetails returns detailed info for a specific cluster
 func (h *APIHandler) GetClusterDetails(c *gin.Context) {
 	clusterName := c.Param("name")
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-	defer cancel()
-
-	// Find cluster config
-	var cfg *models.ClusterConfig
-	for _, clusterCfg := range h.k8sService.GetConfigs() {
-		if clusterCfg.Name == clusterName {
-			cfg = &clusterCfg
-			break
-		}
-	}
-
-	if cfg == nil {
+	clusters := h.registry.GetAll()
+	cl, ok := clusters[clusterName]
+	
+	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
 		return
 	}
 
-	cluster := models.Cluster{
-		Name:        cfg.Name,
-		DisplayName: cfg.DisplayName,
-		Context:     cfg.Context,
-		Status:      "Unknown",
-		LastUpdated: time.Now(),
+	cluster := gin.H{
+		"name":        cl.Name,
+		"displayName": cl.DisplayName,
+		"context":     cl.Name,
+		"status":      "Unknown",
+		"reachable":   cl.Reachable,
+		"nodeCount":   0,
+		"podCount":    0,
+		"cpuUsage":    0.0,
+		"memoryUsage": 0.0,
 	}
 
-	// Check connectivity
-	if !h.k8sService.CheckConnectivity(ctx, cfg.Name) {
-		cluster.Status = "Critical"
-		c.JSON(http.StatusOK, cluster)
+	if !cl.Reachable {
+		cluster["status"] = "Critical"
+		c.JSON(http.StatusOK, gin.H{"cluster": cluster})
 		return
 	}
 
-	// Get detailed metrics
-	nodeCount, _ := h.k8sService.GetNodeCount(ctx, cfg.Name)
-	cluster.NodeCount = nodeCount
+	nodes, _ := cl.Clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+	pods, _ := cl.Clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
 
-	running, pending, failed, total, _ := h.k8sService.GetPodSummary(ctx, cfg.Name)
-	cluster.PodCount = total
-
-	if h.promService.CheckConnectivity(ctx, cfg.PrometheusURL) {
-		cluster.CPUUsage, _ = h.promService.GetCPUUsage(ctx, cfg.PrometheusURL)
-		cluster.MemoryUsage, _ = h.promService.GetMemoryUsage(ctx, cfg.PrometheusURL)
+	running, failed, pending := 0, 0, 0
+	for _, p := range pods.Items {
+		switch p.Status.Phase {
+		case "Running":
+			running++
+		case "Pending":
+			pending++
+		case "Failed", "CrashLoopBackOff":
+			failed++
+		}
 	}
 
-	cluster.Status = determineClusterStatus(cluster.CPUUsage, cluster.MemoryUsage, pending, failed)
+	cluster["nodeCount"] = len(nodes.Items)
+	cluster["podCount"] = len(pods.Items)
+
+	cpu, mem := cl.GetUtilization()
+	cluster["cpuUsage"] = cpu
+	cluster["memoryUsage"] = mem
+
+	if failed > 0 || cpu > 90 || mem > 90 {
+		cluster["status"] = "Warning"
+	} else {
+		cluster["status"] = "Healthy"
+	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"cluster":  cluster,
-		"running":  running,
-		"pending":  pending,
-		"failed":   failed,
+		"cluster": cluster,
+		"running": running,
+		"pending": pending,
+		"failed":  failed,
 	})
 }
 
-// GetClusterNodes returns nodes for a specific cluster
 func (h *APIHandler) GetClusterNodes(c *gin.Context) {
-	clusterName := c.Param("name")
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-	defer cancel()
+	name := c.Param("name")
+	clusters := h.registry.GetAll()
+	cl, ok := clusters[name]
+	if !ok || !cl.Reachable {
+		c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found or unreachable"})
+		return
+	}
 
-	nodes, err := h.k8sService.GetNodes(ctx, clusterName)
+	nodes, err := cl.Clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Find cluster config for Prometheus URL
-	var promURL string
-	for _, cfg := range h.k8sService.GetConfigs() {
-		if cfg.Name == clusterName {
-			promURL = cfg.PrometheusURL
-			break
+	var result []gin.H
+	for _, n := range nodes.Items {
+		ready := "NotReady"
+		for _, cond := range n.Status.Conditions {
+			if cond.Type == "Ready" && cond.Status == "True" {
+				ready = "Ready"
+			}
 		}
-	}
-
-	// Enrich with metrics if Prometheus is available
-	if promURL != "" && h.promService.CheckConnectivity(ctx, promURL) {
-		for i := range nodes {
-			nodes[i].CPUUsage, _ = h.promService.GetNodeCPUUsage(ctx, promURL, nodes[i].Name)
-			nodes[i].MemUsage, _ = h.promService.GetNodeMemoryUsage(ctx, promURL, nodes[i].Name)
+		
+		var roles []string
+		for k := range n.Labels {
+			if len(k) > 17 && k[:17] == "node-role.kubernetes.io/" {
+				roles = append(roles, k[17:])
+			}
 		}
-	}
+		if len(roles) == 0 {
+			roles = append(roles, "<none>")
+		}
 
+		age := time.Since(n.CreationTimestamp.Time).Round(time.Hour)
+		ageStr := ""
+		if age < 24*time.Hour {
+			ageStr = time.Since(n.CreationTimestamp.Time).Truncate(time.Minute).String()
+		} else {
+			days := int(age.Hours() / 24)
+			ageStr = string(rune(days+'0')) + "d"
+		}
+
+		result = append(result, gin.H{
+			"name":    n.Name,
+			"status":  ready,
+			"roles":   roles,
+			"version": n.Status.NodeInfo.KubeletVersion,
+			"age":     ageStr,
+		})
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"nodes": nodes,
-		"count": len(nodes),
+		"nodes": result,
+		"count": len(result),
 	})
 }
 
-// GetClusterPods returns pods for a specific cluster
 func (h *APIHandler) GetClusterPods(c *gin.Context) {
-	clusterName := c.Param("name")
-	namespace := c.Query("namespace")
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-	defer cancel()
+	name := c.Param("name")
+	clusters := h.registry.GetAll()
+	cl, ok := clusters[name]
+	if !ok || !cl.Reachable {
+		c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found or unreachable"})
+		return
+	}
 
-	pods, err := h.k8sService.GetPods(ctx, clusterName, namespace)
+	pods, err := cl.Clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	var result []gin.H
+	for _, p := range pods.Items {
+		var restarts int32
+		for _, cs := range p.Status.ContainerStatuses {
+			restarts += cs.RestartCount
+		}
+
+		result = append(result, gin.H{
+			"name":      p.Name,
+			"namespace": p.Namespace,
+			"status":    string(p.Status.Phase),
+			"restarts":  restarts,
+			"node":      p.Spec.NodeName,
+			"age":       time.Since(p.CreationTimestamp.Time).Truncate(time.Minute).String(),
+		})
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"pods":  pods,
-		"count": len(pods),
+		"pods":  result,
+		"count": len(result),
 	})
 }
 
-// GetAlerts returns active alerts
 func (h *APIHandler) GetAlerts(c *gin.Context) {
-	alerts, err := h.store.GetActiveAlerts()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	clusters := h.registry.GetAll()
+	var alerts []gin.H
+
+	for _, cl := range clusters {
+		if !cl.Reachable {
+			alerts = append(alerts, gin.H{
+				"cluster":  cl.Name,
+				"severity": "Critical",
+				"message":  "Cluster is unreachable",
+			})
+			continue
+		}
+		pods, err := cl.Clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
+		if err == nil {
+			failed := 0
+			for _, p := range pods.Items {
+				if p.Status.Phase == "Failed" || p.Status.Phase == "CrashLoopBackOff" {
+					failed++
+				}
+			}
+			if failed > 0 {
+				alerts = append(alerts, gin.H{
+					"cluster":  cl.Name,
+					"severity": "Warning",
+					"message":  "Pod(s) in Failed state",
+				})
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -216,31 +281,22 @@ func (h *APIHandler) GetAlerts(c *gin.Context) {
 	})
 }
 
-// GetClusterHistory returns historical metrics for a cluster
 func (h *APIHandler) GetClusterHistory(c *gin.Context) {
 	clusterName := c.Param("name")
 
-	snapshots, err := h.store.GetSnapshots(clusterName, 24*time.Hour)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	if h.store != nil {
+		snapshots, err := h.store.GetSnapshots(clusterName, 24*time.Hour)
+		if err == nil {
+			c.JSON(http.StatusOK, gin.H{
+				"snapshots": snapshots,
+				"count":     len(snapshots),
+			})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"snapshots": snapshots,
-		"count":     len(snapshots),
+		"snapshots": []interface{}{},
+		"count":     0,
 	})
-}
-
-// Helper function to determine cluster health status
-func determineClusterStatus(cpuUsage, memUsage float64, pending, failed int) string {
-	// Critical conditions
-	if cpuUsage > 95 || memUsage > 95 || failed > 0 {
-		return "Critical"
-	}
-	// Warning conditions
-	if cpuUsage > 80 || memUsage > 80 || pending > 5 {
-		return "Warning"
-	}
-	return "Healthy"
 }

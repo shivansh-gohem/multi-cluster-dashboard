@@ -25,10 +25,14 @@ clusters:
   #   enabled: true
 
   # Add your clusters below:
-  - name: cluster1
-    displayName: "Primary Cluster"
-    context: "your-kubeconfig-context"
-    prometheusURL: "http://your-prometheus-endpoint:9090"
+  - name: local-kind
+    displayName: "Local Kind (kmesh)"
+    context: "kind-kmesh"
+    enabled: true
+
+  - name: knee-cluster
+    displayName: "Kind (knee)"
+    context: "kind-knee"
     enabled: true
 
 # How to use:
