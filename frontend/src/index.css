@@ -1,0 +1,158 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    --background: 220 20% 97%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 263 70% 50%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 220 14% 92%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 263 70% 50%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 87%;
+    --input: 220 13% 87%;
+    --ring: 217 91% 60%;
+    --radius: 0.75rem;
+
+    --status-healthy: 160 84% 39%;
+    --status-warning: 38 92% 50%;
+    --status-critical: 0 84% 60%;
+    --status-offline: 220 9% 46%;
+    --metric-cpu: 217 91% 60%;
+    --metric-memory: 263 70% 50%;
+
+    --glass-bg: 0 0% 100% / 0.7;
+    --glass-border: 0 0% 100% / 0.3;
+    --glass-blur: 12px;
+  }
+
+  .dark {
+    --background: 224 30% 7%;
+    --foreground: 210 40% 96%;
+    --card: 224 25% 10%;
+    --card-foreground: 210 40% 96%;
+    --popover: 224 25% 12%;
+    --popover-foreground: 210 40% 96%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 263 70% 50%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 224 20% 15%;
+    --muted-foreground: 218 11% 55%;
+    --accent: 263 70% 50%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 224 20% 18%;
+    --input: 224 20% 18%;
+    --ring: 217 91% 60%;
+
+    --glass-bg: 224 30% 12% / 0.6;
+    --glass-border: 224 20% 25% / 0.4;
+    --glass-blur: 16px;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply rounded-xl border;
+    background: hsl(var(--glass-bg));
+    border-color: hsl(var(--glass-border));
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+  }
+
+  .glass-card-hover {
+    @apply glass-card transition-all duration-300;
+  }
+  .glass-card-hover:hover {
+    border-color: hsl(var(--primary) / 0.4);
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.1);
+  }
+
+  .status-dot {
+    @apply w-2.5 h-2.5 rounded-full;
+  }
+  .status-dot-healthy { background: hsl(var(--status-healthy)); }
+  .status-dot-warning { background: hsl(var(--status-warning)); }
+  .status-dot-critical { background: hsl(var(--status-critical)); }
+  .status-dot-offline { background: hsl(var(--status-offline)); }
+
+  .status-badge {
+    @apply px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .status-badge-healthy {
+    background: hsl(var(--status-healthy) / 0.15);
+    color: hsl(var(--status-healthy));
+  }
+  .status-badge-warning {
+    background: hsl(var(--status-warning) / 0.15);
+    color: hsl(var(--status-warning));
+  }
+  .status-badge-critical {
+    background: hsl(var(--status-critical) / 0.15);
+    color: hsl(var(--status-critical));
+  }
+  .status-badge-offline {
+    background: hsl(var(--status-offline) / 0.15);
+    color: hsl(var(--status-offline));
+  }
+  .status-badge-info {
+    background: hsl(var(--primary) / 0.15);
+    color: hsl(var(--primary));
+  }
+}
+
+@layer utilities {
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .animate-pulse-dot {
+    animation: pulse-dot 1.5s ease-in-out infinite;
+  }
+
+  @keyframes fade-slide-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .animate-fade-slide-in {
+    animation: fade-slide-in 0.4s ease-out forwards;
+  }
+
+  @keyframes spin-slow {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  .animate-spin-slow {
+    animation: spin-slow 1s linear infinite;
+  }
+}

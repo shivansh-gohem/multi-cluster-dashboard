@@ -250,11 +250,6 @@ func (h *APIHandler) GetAlerts(c *gin.Context) {
 
 	for _, cl := range clusters {
 		if !cl.Reachable {
-			alerts = append(alerts, gin.H{
-				"cluster":  cl.Name,
-				"severity": "Critical",
-				"message":  "Cluster is unreachable",
-			})
 			continue
 		}
 		pods, err := cl.Clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
